@@ -2,14 +2,16 @@ import re
 import sys
 
 
-def basestring_type():
-    if sys.version_info[0] < 3:  # Backwards compatibility for python < v3.0.0
-        return basestring
-    else:
-        return str
+def get_basestring_type():
+    """
+    Returns the appropriate string type based on the Python version.
+    For Python 2.x, returns basestring; for Python 3.x, returns str.
+    """
+    return basestring if sys.version_info[0] < 3 else str
 
 
 class ApiAccessError(Exception):
+    """Custom exception raised for API access errors."""
     pass
 
 
@@ -19,40 +21,56 @@ class ApiAccess:
     IMPLIED_SCOPE_RE = re.compile(r"\A(?P<unauthenticated>unauthenticated_)?write_(?P<resource>.*)\Z")
 
     def __init__(self, scopes):
-        if isinstance(scopes, basestring_type()):
+        """
+        Initializes ApiAccess with the provided scopes. If a single string is passed,
+        it splits it by the delimiter into a list of scopes.
+        """
+        if isinstance(scopes, get_basestring_type()):
             scopes = scopes.split(self.SCOPE_DELIMITER)
 
-        self.__store_scopes(scopes)
+        self._store_scopes(scopes)
 
     def covers(self, api_access):
+        """
+        Checks if the current access covers the provided API access.
+        """
         return api_access._compressed_scopes <= self._expanded_scopes
 
     def __str__(self):
+        """Returns a string representation of the compressed scopes."""
         return self.SCOPE_DELIMITER.join(self._compressed_scopes)
 
     def __iter__(self):
+        """Returns an iterator over the compressed scopes."""
         return iter(self._compressed_scopes)
 
     def __eq__(self, other):
-        return type(self) == type(other) and self._compressed_scopes == other._compressed_scopes
+        """Compares two ApiAccess instances for equality."""
+        return isinstance(other, ApiAccess) and self._compressed_scopes == other._compressed_scopes
 
-    def __store_scopes(self, scopes):
-        sanitized_scopes = frozenset(filter(None, [scope.strip() for scope in scopes]))
-        self.__validate_scopes(sanitized_scopes)
-        implied_scopes = frozenset(self.__implied_scope(scope) for scope in sanitized_scopes)
+    def _store_scopes(self, scopes):
+        """
+        Processes and stores the provided scopes, separating implied and regular scopes.
+        """
+        sanitized_scopes = frozenset(filter(None, (scope.strip() for scope in scopes)))
+        self._validate_scopes(sanitized_scopes)
+        implied_scopes = frozenset(self._get_implied_scope(scope) for scope in sanitized_scopes)
         self._compressed_scopes = sanitized_scopes - implied_scopes
         self._expanded_scopes = sanitized_scopes.union(implied_scopes)
 
-    def __validate_scopes(self, scopes):
+    def _validate_scopes(self, scopes):
+        """
+        Validates that each scope matches the expected pattern.
+        """
         for scope in scopes:
             if not self.SCOPE_RE.match(scope):
-                error_message = "'{s}' is not a valid access scope".format(s=scope)
-                raise ApiAccessError(error_message)
+                raise ApiAccessError(f"'{scope}' is not a valid access scope")
 
-    def __implied_scope(self, scope):
+    def _get_implied_scope(self, scope):
+        """
+        Returns the implied scope for a given scope, if applicable.
+        """
         match = self.IMPLIED_SCOPE_RE.match(scope)
         if match:
-            return "{unauthenticated}read_{resource}".format(
-                unauthenticated=match.group("unauthenticated") or "",
-                resource=match.group("resource"),
-            )
+            return f"{match.group('unauthenticated') or ''}read_{match.group('resource')}"
+        return None
